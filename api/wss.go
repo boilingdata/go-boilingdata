@@ -16,7 +16,10 @@ func (h *Handler) ConnectWSS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
+	if h.instance.Auth == nil || !h.instance.Auth.IsUserLoggedIn() {
+		http.Error(w, "User signed out, Please Login!", http.StatusUnauthorized)
+		return
+	}
 	// Read the request body
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -30,17 +33,21 @@ func (h *Handler) ConnectWSS(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &wssPayload); err != nil {
 		log.Fatalf("failed to parse JSON: %v", err)
 	}
-	headers, err := h.UserService.Auth.GetAWSSingingHeaders(wssPayload.WssURL)
+	headers, err := h.instance.Auth.GetAWSSingingHeaders(wssPayload.WssURL)
 	if err != nil {
 		http.Error(w, "Error preparing request", http.StatusInternalServerError)
 		return
 	}
-	h.UserService.Wsc.SignedHeader = headers
-	h.UserService.Wsc.Connect()
-	if h.UserService.Wsc.IsWebSocketClosed() {
-		http.Error(w, h.UserService.Wsc.Error, http.StatusInternalServerError)
+	h.instance.Wsc.SignedHeader = headers
+	if h.instance.Wsc.IsWebSocketClosed() {
+		h.instance.Wsc.Connect()
+		if h.instance.Wsc.IsWebSocketClosed() {
+			http.Error(w, h.instance.Wsc.Error, http.StatusInternalServerError)
+		} else {
+			w.Write([]byte("Connected!"))
+		}
 	} else {
-		w.Write([]byte("Connected!"))
+		w.Write([]byte("Already Connected!"))
 	}
 }
 
@@ -50,23 +57,23 @@ func (h *Handler) GetSignedWSSUrl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.UserService.Auth.IsUserLoggedIn() {
+	if h.instance.Auth == nil || !h.instance.Auth.IsUserLoggedIn() {
 		http.Error(w, "User signed out, Please Login!", http.StatusUnauthorized)
 		return
 	}
 
-	idToken, err := h.UserService.Auth.AuthenticateUser()
+	idToken, err := h.instance.Auth.Authenticate()
 	if err != nil {
 		http.Error(w, "Error : "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	headers, err := h.UserService.Auth.GetSignedWssHeader(idToken)
+	headers, err := h.instance.Auth.GetSignedWssHeader(idToken)
 	if err != nil {
 		http.Error(w, "Error getting signed headers: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	sigedUrl, err := h.UserService.Auth.GetSignedWssUrl(headers)
+	sigedUrl, err := h.instance.Auth.GetSignedWssUrl(headers)
 	if err != nil {
 		http.Error(w, "Error Signing wssUrl: "+err.Error(), http.StatusInternalServerError)
 		return

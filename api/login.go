@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/boilingdata/go-boilingdata/service"
+	"github.com/pavi6691/go-boilingdata/boilingdata"
 )
 
 type Credentials struct {
@@ -34,12 +34,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to parse JSON: %v", http.StatusInternalServerError)
 		return
 	}
-	userService := service.GetUserService(creds.UserName, creds.Password)
-	_, err = userService.Auth.AuthenticateUser()
+	instance := boilingdata.GetInstance(creds.UserName, creds.Password)
+	_, err = instance.Auth.Authenticate()
 	if err != nil {
 		http.Error(w, "Error : "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.UserService = userService
+	h.instance = *instance
 	w.Write([]byte("Login Successful!"))
 }

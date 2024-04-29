@@ -5,11 +5,11 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/boilingdata/go-boilingdata/service"
+	"github.com/pavi6691/go-boilingdata/boilingdata"
 )
 
 type Handler struct {
-	UserService service.UserService
+	instance boilingdata.Instance
 }
 
 func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
@@ -19,7 +19,7 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.UserService.Auth.IsUserLoggedIn() {
+	if h.instance.Auth == nil || !h.instance.Auth.IsUserLoggedIn() {
 		http.Error(w, "User signed out, Please Login!", http.StatusUnauthorized)
 		return
 	}
@@ -30,7 +30,7 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.UserService.Query(body)
+	response, err := h.instance.Query(body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

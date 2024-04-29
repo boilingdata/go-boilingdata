@@ -10,7 +10,7 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "/Users/parveenkaradi/go-boilingdata/cmd/main.go"
+            "program": "/Users/praveen/go-boilingdata/cmd/main.go"
         }
     ]
 }
