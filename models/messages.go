@@ -19,6 +19,7 @@ type Response struct {
 	SubBatchSerial    int                      `json:"subBatchSerial"`
 	TotalSubBatches   int                      `json:"totalSubBatches"`
 	Data              []map[string]interface{} `json:"data"`
+	Keys              []string                 `json:"-"`
 }
 
 // Define structs to represent the JSON payload

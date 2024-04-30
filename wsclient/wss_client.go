@@ -1,6 +1,7 @@
 package wsclient
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -192,11 +193,88 @@ func (wsc *WSSClient) receiveMessageAsync() {
 			if v, ok := wsc.resultsMap.Get(response.RequestID); !ok || v == nil {
 				var responses = cmap.New()
 				wsc.resultsMap.Set(response.RequestID, responses)
+				response.Keys = extractKeys(message)
 			}
 			v, _ := wsc.resultsMap.Get(response.RequestID)
 			v.(cmap.ConcurrentMap).Set(string(response.SubBatchSerial), response)
 		}
 	}
+}
+
+// Function to extract keys from the "data" array
+func extractKeys(jsonData []byte) []string {
+	// Define a struct to hold the "data" array
+	var data struct {
+		Data []json.RawMessage `json:"data"`
+	}
+
+	// Unmarshal the JSON data into the struct
+	err := json.Unmarshal(jsonData, &data)
+	if err != nil {
+		log.Println("Error extracting keys from response data:", err)
+		return nil
+	}
+
+	// If there's no data, return nil
+	if len(data.Data) == 0 {
+		log.Println("No data found")
+		return nil
+	}
+
+	// Define an empty map to store the keys of the first entry
+	var firstEntry json.RawMessage
+
+	// Unmarshal the first entry to extract the keys
+	err = json.Unmarshal(data.Data[0], &firstEntry)
+	if err != nil {
+		log.Println("Error extracting keys from response data:", err)
+		return nil
+	}
+	return parse(firstEntry)
+}
+
+func parse(raw json.RawMessage) []string {
+	// Convert RawMessage to byte slice
+	rawData := []byte(raw)
+
+	var keys []string
+
+	// Index keeps track of the position in the JSON byte slice
+	index := 0
+
+	// Loop until the end of the JSON byte slice
+	for index < len(rawData) {
+		// Find the next double quote, which indicates the start of a key
+		keyStart := bytes.IndexByte(rawData[index:], '"')
+		if keyStart == -1 {
+			// If no double quote is found, break the loop
+			break
+		}
+
+		// Adjust the index to the position of the double quote
+		index += keyStart + 1
+
+		// Find the end of the key by searching for the closing double quote
+		keyEnd := bytes.IndexByte(rawData[index:], '"')
+		if keyEnd == -1 {
+			// If no closing double quote is found, break the loop
+			break
+		}
+
+		// Extract the key from the JSON byte slice
+		key := string(rawData[index : index+keyEnd])
+
+		// Check if the key is followed by a colon (":")
+		if index+keyEnd+1 < len(rawData) && string(rawData[index+keyEnd:index+keyEnd+2]) == "\":" {
+			// Append the key to the keys slice
+			keys = append(keys, key)
+		}
+
+		// Adjust the index to the position after the closing double quote
+		index += keyEnd + 1
+	}
+
+	return keys
 }
 
 func (wsc *WSSClient) GetResponseSync(requestID string) (*models.Response, error) {
