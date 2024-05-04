@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/pavi6691/go-boilingdata/api"
+	"github.com/boilingdata/go-boilingdata/api"
 )
 
 func main() {

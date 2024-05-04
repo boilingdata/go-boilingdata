@@ -13,8 +13,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	cmap "github.com/orcaman/concurrent-map"
-	"github.com/pavi6691/go-boilingdata/constants"
-	"github.com/pavi6691/go-boilingdata/models"
+	"github.com/boilingdata/go-boilingdata/constants"
+	"github.com/boilingdata/go-boilingdata/models"
 )
 
 // WSSClient represents the WebSocket client.

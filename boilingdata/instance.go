@@ -8,9 +8,9 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	cmap "github.com/orcaman/concurrent-map"
-	"github.com/pavi6691/go-boilingdata/constants"
-	"github.com/pavi6691/go-boilingdata/models"
-	"github.com/pavi6691/go-boilingdata/wsclient"
+	"github.com/boilingdata/go-boilingdata/constants"
+	"github.com/boilingdata/go-boilingdata/models"
+	"github.com/boilingdata/go-boilingdata/wsclient"
 )
 
 type Instance struct {

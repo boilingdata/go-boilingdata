@@ -17,7 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	v4 "github.com/aws/aws-sdk-go/aws/signer/v4"
 	"github.com/aws/aws-sdk-go/service/cognitoidentityprovider"
-	"github.com/pavi6691/go-boilingdata/constants"
+	"github.com/boilingdata/go-boilingdata/constants"
 )
 
 type AwsCredentials struct {

@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/pavi6691/go-boilingdata/boilingdata"
+	"github.com/boilingdata/go-boilingdata/boilingdata"
 )
 
 type Credentials struct {
