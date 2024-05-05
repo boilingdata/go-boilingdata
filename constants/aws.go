@@ -12,7 +12,7 @@ const (
 	ClientID                string        = "6timr8knllr4frovfvq8r2o6oo"
 	WssUrl                  string        = "wss://4rpyi2ae3f.execute-api.eu-west-1.amazonaws.com/prodbd"
 	Service                 string        = "execute-api"
-	IdleTimeoutMinutes      time.Duration = 1 * time.Minute
+	IdleTimeoutMinutes      time.Duration = 10 * time.Minute
 	TimeOutWaintForResponse time.Duration = 60 * time.Second
 	SignWrlFormat                         = "X-Amz-Algorithm=AWS4-HMAC-SHA256&" +
 		"X-Amz-Credential=%s" +
