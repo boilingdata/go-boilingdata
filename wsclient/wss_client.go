@@ -3,6 +3,7 @@ package wsclient
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -208,14 +209,17 @@ func (wsc *WSSClient) receiveMessageAsync() {
 						wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Error parsing JSON: "+err.Error()))
 					} else {
 						log.Println("Log message from server :", logMessage.LogMessage)
-						wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Log message from server: "+logMessage.LogMessage))
+						if logMessage.LogLevel == "ERROR" {
+							wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Log message from server: "+logMessage.LogMessage))
+						}
 					}
 				} else if messages.DATA.String() == response.MessageType {
-					if v, ok := wsc.resultsMap.Get(response.RequestID); !ok || v == nil {
+					v, _ := wsc.resultsMap.Get(response.RequestID)
+					if _, ok := v.(cmap.ConcurrentMap); !ok {
 						var responses = cmap.New()
 						wsc.resultsMap.Set(response.RequestID, responses)
+						v, _ = wsc.resultsMap.Get(response.RequestID)
 					}
-					v, _ := wsc.resultsMap.Get(response.RequestID)
 					if response.TotalSubBatches == 0 || response.TotalSubBatches == response.SubBatchSerial {
 						response.Keys = extractKeys(message)
 					}
@@ -304,48 +308,59 @@ func parse(raw json.RawMessage) []string {
 
 func (wsc *WSSClient) GetResponseSync(requestID string) (*messages.Response, error) {
 	var temp *messages.Response
+	timeout := time.After(constants.TimeOutWaintForResponse)
 	for {
-		if v, ok := wsc.resultsMap.Get("error"); ok {
-			if v != nil {
-				return &messages.Response{}, v.(error)
-			}
-		}
-		if _, ok := wsc.resultsMap.Get(requestID); !ok {
-			continue
-		}
-		responses, _ := wsc.resultsMap.Get(requestID)
-		if v, ok := responses.(error); ok {
-			return &messages.Response{}, v
-		}
-		if responses == nil {
-			continue
-		}
-		if v, ok := responses.(cmap.ConcurrentMap); ok {
-			if v.Count() > 0 {
-				if temp == nil {
-					for item := range v.IterBuffered() {
-						temp = item.Val.(*messages.Response)
-						break
-					}
+		select {
+		case <-timeout:
+			return nil, errors.New("timeout occurred while waiting for response")
+		default:
+			if v, ok := wsc.resultsMap.Get("error"); ok {
+				if v != nil {
+					return &messages.Response{}, v.(error)
 				}
-				if len(temp.Data) <= 0 {
-					return &messages.Response{}, fmt.Errorf("No response from server. Check SQL syntax")
-				} else if temp.TotalSubBatches == 0 || temp.TotalSubBatches == v.Count() {
-					var data []map[string]interface{}
-					for i := 0; i <= v.Count(); i++ {
-						v, _ := v.Get(string(rune(i)))
-						if v != nil {
-							data = append(data, v.(*messages.Response).Data...)
+			}
+			if _, ok := wsc.resultsMap.Get(requestID); !ok {
+				continue
+			}
+			responses, _ := wsc.resultsMap.Get(requestID)
+			if v, ok := responses.(error); ok {
+				return &messages.Response{}, v
+			}
+			commonError, _ := wsc.resultsMap.Get("")
+			if v, ok := commonError.(error); ok {
+				wsc.resultsMap.Set("", nil)
+				return &messages.Response{}, v
+			}
+			if responses == nil {
+				continue
+			}
+			if v, ok := responses.(cmap.ConcurrentMap); ok {
+				if v.Count() > 0 {
+					if temp == nil {
+						for item := range v.IterBuffered() {
+							temp = item.Val.(*messages.Response)
+							break
 						}
 					}
-					if v.Count() > 0 {
-						val, _ := v.Get(string(rune(v.Count())))
-						if val == nil {
-							val, _ = v.Get(string(rune(0)))
+					if len(temp.Data) <= 0 {
+						return &messages.Response{}, fmt.Errorf("No response from server. Check SQL syntax")
+					} else if temp.TotalSubBatches == 0 || temp.TotalSubBatches == v.Count() {
+						var data []map[string]interface{}
+						for i := 0; i <= v.Count(); i++ {
+							v, _ := v.Get(string(rune(i)))
+							if v != nil {
+								data = append(data, v.(*messages.Response).Data...)
+							}
 						}
-						finalResponse := val.(*messages.Response)
-						finalResponse.Data = data
-						return finalResponse, nil
+						if v.Count() > 0 {
+							val, _ := v.Get(string(rune(v.Count())))
+							if val == nil {
+								val, _ = v.Get(string(rune(0)))
+							}
+							finalResponse := val.(*messages.Response)
+							finalResponse.Data = data
+							return finalResponse, nil
+						}
 					}
 				}
 			}

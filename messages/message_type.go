@@ -4,8 +4,6 @@ type Payload struct {
 	MessageType string `json:"messageType"`
 	SQL         string `json:"sql"`
 	RequestID   string `json:"requestId"`
-	ReadCache   string `json:"readCache"`
-	Tags        []Tag  `json:"tags"`
 }
 
 type Response struct {

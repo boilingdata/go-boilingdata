@@ -93,7 +93,7 @@ func (instance *Instance) Query(payloadMessage []byte) (*message.Response, error
 	}
 	instance.Wsc.SendMessage(payloadMessage, payload)
 	response, err := instance.Wsc.GetResponseSync(payload.RequestID)
-	if response.Data == nil || err != nil {
+	if err != nil || response.Data == nil {
 		errorMessage := ""
 		if err != nil {
 			errorMessage = err.Error()
