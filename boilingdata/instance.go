@@ -6,11 +6,11 @@ import (
 	"log"
 	"sync"
 
+	"github.com/boilingdata/go-boilingdata/constants"
+	message "github.com/boilingdata/go-boilingdata/messages"
+	"github.com/boilingdata/go-boilingdata/wsclient"
 	"github.com/golang-jwt/jwt/v4"
 	cmap "github.com/orcaman/concurrent-map"
-	"github.com/boilingdata/go-boilingdata/constants"
-	"github.com/boilingdata/go-boilingdata/models"
-	"github.com/boilingdata/go-boilingdata/wsclient"
 )
 
 type Instance struct {
@@ -69,27 +69,27 @@ func RemoveUser(userName string) {
 	queryServiceMap.Remove(userName)
 }
 
-func (instance *Instance) Query(payloadMessage []byte) (*models.Response, error) {
+func (instance *Instance) Query(payloadMessage []byte) (*message.Response, error) {
 	// If web socket is closed, in case of timeout/user signout/os intruptions etc
 	if instance.Wsc.IsWebSocketClosed() {
 		idToken, err := instance.Auth.Authenticate()
 		if err != nil {
-			return &models.Response{}, fmt.Errorf("Error : " + err.Error())
+			return &message.Response{}, fmt.Errorf("Error : " + err.Error())
 		}
 		header, err := instance.Auth.GetSignedWssHeader(idToken)
 		if err != nil {
-			return &models.Response{}, fmt.Errorf("Error Signing wssUrl: " + err.Error())
+			return &message.Response{}, fmt.Errorf("Error Signing wssUrl: " + err.Error())
 		}
 		instance.Wsc.SignedHeader = header
 		instance.Wsc.Connect()
 		if instance.Wsc.IsWebSocketClosed() {
-			return &models.Response{}, fmt.Errorf(instance.Wsc.Error)
+			return &message.Response{}, fmt.Errorf(instance.Wsc.Error)
 		}
 	}
-	var payload models.Payload
+	var payload message.Payload
 	if err := json.Unmarshal(payloadMessage, &payload); err != nil {
 		log.Println("error unmarshalling Payload : " + err.Error())
-		return &models.Response{}, fmt.Errorf("error unmarshalling Payload : " + err.Error())
+		return &message.Response{}, fmt.Errorf("error unmarshalling Payload : " + err.Error())
 	}
 	instance.Wsc.SendMessage(payloadMessage, payload)
 	response, err := instance.Wsc.GetResponseSync(payload.RequestID)
@@ -98,7 +98,7 @@ func (instance *Instance) Query(payloadMessage []byte) (*models.Response, error)
 		if err != nil {
 			errorMessage = err.Error()
 		}
-		return &models.Response{}, fmt.Errorf("Internal Server Error, could not read messages from websocket -> " + errorMessage)
+		return &message.Response{}, fmt.Errorf("Internal Server Error, could not read messages from websocket -> " + errorMessage)
 	}
 	return response, nil
 }

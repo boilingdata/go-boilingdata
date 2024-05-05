@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"github.com/boilingdata/go-boilingdata/constants"
-	"github.com/boilingdata/go-boilingdata/messagetype"
-	"github.com/boilingdata/go-boilingdata/models"
+	"github.com/boilingdata/go-boilingdata/messages"
 	"github.com/gorilla/websocket"
 	cmap "github.com/orcaman/concurrent-map"
 )
@@ -106,7 +105,7 @@ func (wsc *WSSClient) connect() {
 }
 
 // SendMessage sends a message over the WebSocket connection.
-func (wsc *WSSClient) SendMessage(message []byte, payload models.Payload) {
+func (wsc *WSSClient) SendMessage(message []byte, payload messages.Payload) {
 	wsc.resultsMap.Set("error", nil)
 	wsc.resultsMap.Set(payload.RequestID, nil)
 	wsc.messageChannel <- message
@@ -195,13 +194,23 @@ func (wsc *WSSClient) receiveMessageAsync() {
 				wsc.resultsMap.Set("error", fmt.Errorf("Could not read message from websocket -> ", err.Error()))
 				wsc.Close()
 			} else if message != nil {
-				var response *models.Response
+				var response *messages.Response
 				err = json.Unmarshal([]byte(message), &response)
 				if err != nil {
 					log.Println("Error parsing JSON:", err.Error())
 					wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Error parsing JSON: "+err.Error()))
 				}
-				if messagetype.DATA.String() == response.MessageType {
+				if messages.LOG_MESSAGE.String() == response.MessageType {
+					var logMessage *messages.LogMessage
+					err = json.Unmarshal([]byte(message), &logMessage)
+					if err != nil {
+						log.Println("Error parsing JSON:", err.Error())
+						wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Error parsing JSON: "+err.Error()))
+					} else {
+						log.Println("Log message from server :", logMessage.LogMessage)
+						wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Log message from server: "+logMessage.LogMessage))
+					}
+				} else if messages.DATA.String() == response.MessageType {
 					if v, ok := wsc.resultsMap.Get(response.RequestID); !ok || v == nil {
 						var responses = cmap.New()
 						wsc.resultsMap.Set(response.RequestID, responses)
@@ -293,12 +302,12 @@ func parse(raw json.RawMessage) []string {
 	return keys
 }
 
-func (wsc *WSSClient) GetResponseSync(requestID string) (*models.Response, error) {
-	var temp *models.Response
+func (wsc *WSSClient) GetResponseSync(requestID string) (*messages.Response, error) {
+	var temp *messages.Response
 	for {
 		if v, ok := wsc.resultsMap.Get("error"); ok {
 			if v != nil {
-				return &models.Response{}, v.(error)
+				return &messages.Response{}, v.(error)
 			}
 		}
 		if _, ok := wsc.resultsMap.Get(requestID); !ok {
@@ -306,7 +315,7 @@ func (wsc *WSSClient) GetResponseSync(requestID string) (*models.Response, error
 		}
 		responses, _ := wsc.resultsMap.Get(requestID)
 		if v, ok := responses.(error); ok {
-			return &models.Response{}, v
+			return &messages.Response{}, v
 		}
 		if responses == nil {
 			continue
@@ -315,18 +324,18 @@ func (wsc *WSSClient) GetResponseSync(requestID string) (*models.Response, error
 			if v.Count() > 0 {
 				if temp == nil {
 					for item := range v.IterBuffered() {
-						temp = item.Val.(*models.Response)
+						temp = item.Val.(*messages.Response)
 						break
 					}
 				}
 				if len(temp.Data) <= 0 {
-					return &models.Response{}, fmt.Errorf("No response from server. Check SQL syntax")
+					return &messages.Response{}, fmt.Errorf("No response from server. Check SQL syntax")
 				} else if temp.TotalSubBatches == 0 || temp.TotalSubBatches == v.Count() {
 					var data []map[string]interface{}
 					for i := 0; i <= v.Count(); i++ {
 						v, _ := v.Get(string(rune(i)))
 						if v != nil {
-							data = append(data, v.(*models.Response).Data...)
+							data = append(data, v.(*messages.Response).Data...)
 						}
 					}
 					if v.Count() > 0 {
@@ -334,7 +343,7 @@ func (wsc *WSSClient) GetResponseSync(requestID string) (*models.Response, error
 						if val == nil {
 							val, _ = v.Get(string(rune(0)))
 						}
-						finalResponse := val.(*models.Response)
+						finalResponse := val.(*messages.Response)
 						finalResponse.Data = data
 						return finalResponse, nil
 					}
