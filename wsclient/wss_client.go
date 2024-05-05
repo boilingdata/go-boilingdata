@@ -79,7 +79,7 @@ func (wsc *WSSClient) connect() {
 			select {
 			case <-interrupt:
 				log.Println("Interrupt signal received, closing connection")
-				wsc.Close()
+				wsc.close(true)
 				return
 			}
 		}
@@ -113,15 +113,17 @@ func (wsc *WSSClient) SendMessage(message []byte, payload messages.Payload) {
 }
 
 // Close closes the WebSocket connection. perform clean up
-func (wsc *WSSClient) Close() {
+func (wsc *WSSClient) close(stopProcesses bool) {
 	wsc.mu.Lock()
 	defer wsc.mu.Unlock()
 	if wsc.Conn != nil {
 		wsc.Conn.Close()
 		wsc.Conn = nil
-		wsc.idleTimer = nil
-		wsc.resultsMap.Clear()
-		log.Println("Websocket connnection closed")
+	}
+	wsc.idleTimer = nil
+	wsc.resultsMap.Clear()
+	log.Println("Websocket connnection closed")
+	if stopProcesses {
 		close(wsc.stopChannel)
 	}
 }
@@ -137,19 +139,19 @@ func (wsc *WSSClient) resetIdleTimer() {
 	}
 	wsc.idleTimer = time.AfterFunc(wsc.idleTimeoutMinutes, func() {
 		log.Println("Idle timeout reached, closing connection")
-		wsc.Close()
+		wsc.close(true)
 	})
 }
 
 // Async function to send message through channel
 func (wsc *WSSClient) sendMessageAsync() {
-	defer wsc.Close()
+	defer wsc.close(false)
 	for {
 		select {
 		// Read message from the query message channel
 		case message, ok := <-wsc.messageChannel:
 			if !ok {
-				wsc.Close()
+				return
 			} else {
 				if wsc.Conn == nil {
 					log.Println(fmt.Errorf("Could not send message to websocket -> Not connected to WebSocket server"))
@@ -164,7 +166,7 @@ func (wsc *WSSClient) sendMessageAsync() {
 				if err != nil {
 					log.Println(fmt.Errorf("Could not send message to websocket: %s", err.Error()))
 					wsc.resultsMap.Set("error", fmt.Errorf("Could not send message to websocket: %s", err.Error()))
-					wsc.Close()
+					return
 				}
 			}
 		case <-wsc.stopChannel:
@@ -176,7 +178,7 @@ func (wsc *WSSClient) sendMessageAsync() {
 
 // Async function to receive message through channel
 func (wsc *WSSClient) receiveMessageAsync() {
-	defer wsc.Close()
+	defer wsc.close(false)
 	for {
 		select {
 		case <-wsc.stopChannel:
@@ -193,7 +195,7 @@ func (wsc *WSSClient) receiveMessageAsync() {
 			if err != nil {
 				log.Println(fmt.Errorf("Could not read message from websocket -> ", err.Error()))
 				wsc.resultsMap.Set("error", fmt.Errorf("Could not read message from websocket -> ", err.Error()))
-				wsc.Close()
+				return
 			} else if message != nil {
 				var response *messages.Response
 				err = json.Unmarshal([]byte(message), &response)
