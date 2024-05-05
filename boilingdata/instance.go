@@ -98,7 +98,7 @@ func (instance *Instance) Query(payloadMessage []byte) (*message.Response, error
 		if err != nil {
 			errorMessage = err.Error()
 		}
-		return &message.Response{}, fmt.Errorf("Internal Server Error, could not read messages from websocket -> " + errorMessage)
+		return &message.Response{}, fmt.Errorf(errorMessage)
 	}
 	return response, nil
 }
