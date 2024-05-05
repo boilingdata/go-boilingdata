@@ -179,11 +179,13 @@ func getSignedHeaders(creds AwsCredentials) (http.Header, error) {
 func (auth *Auth) Authenticate() (string, error) {
 	muLock.Lock()
 	defer muLock.Unlock()
-
+	if auth.userName == "" || auth.password == "" {
+		return "", fmt.Errorf("UnAuthorized")
+	}
 	var authInput *cognitoidentityprovider.InitiateAuthInput
 	if auth.IsUserLoggedIn() && !auth.IsTokenExpired() {
 		return *auth.authResult.IdToken, nil
-	} else if auth.IsUserLoggedIn() || auth.password == "" {
+	} else if auth.IsUserLoggedIn() {
 		log.Println("Token expired, Getting token with refresh token..")
 		authInput = &cognitoidentityprovider.InitiateAuthInput{
 			AuthFlow: aws.String("REFRESH_TOKEN_AUTH"),
