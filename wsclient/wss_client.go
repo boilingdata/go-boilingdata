@@ -11,27 +11,28 @@ import (
 	"sync"
 	"time"
 
+	"github.com/boilingdata/go-boilingdata/constants"
+	"github.com/boilingdata/go-boilingdata/messagetype"
+	"github.com/boilingdata/go-boilingdata/models"
 	"github.com/gorilla/websocket"
 	cmap "github.com/orcaman/concurrent-map"
-	"github.com/boilingdata/go-boilingdata/constants"
-	"github.com/boilingdata/go-boilingdata/models"
 )
 
 // WSSClient represents the WebSocket client.
 type WSSClient struct {
-	URL                 string
-	Conn                *websocket.Conn
-	DialOpts            *websocket.Dialer
-	idleTimeoutMinutes  time.Duration
-	idleTimer           *time.Timer
-	Wg                  sync.WaitGroup
-	ConnInit            sync.WaitGroup
-	SignedHeader        http.Header
-	Error               string
-	mu                  sync.Mutex
-	queryMessageChannel chan []byte
-	isEveythingOK       bool
-	resultsMap          cmap.ConcurrentMap
+	URL                string
+	Conn               *websocket.Conn
+	DialOpts           *websocket.Dialer
+	idleTimeoutMinutes time.Duration
+	idleTimer          *time.Timer
+	Wg                 sync.WaitGroup
+	ConnInit           sync.WaitGroup
+	SignedHeader       http.Header
+	Error              string
+	mu                 sync.Mutex
+	messageChannel     chan []byte
+	stopChannel        chan []byte
+	resultsMap         cmap.ConcurrentMap
 }
 
 // NewWSSClient creates a new instance of WSSClient.
@@ -41,13 +42,13 @@ func NewWSSClient(url string, idleTimeoutMinutes time.Duration, signedHeader htt
 		signedHeader = make(http.Header)
 	}
 	return &WSSClient{
-		URL:                 url,
-		DialOpts:            &websocket.Dialer{},
-		idleTimeoutMinutes:  idleTimeoutMinutes,
-		SignedHeader:        signedHeader,
-		queryMessageChannel: make(chan []byte),
-		isEveythingOK:       true,
-		resultsMap:          cmap.New(),
+		URL:                url,
+		DialOpts:           &websocket.Dialer{},
+		idleTimeoutMinutes: idleTimeoutMinutes,
+		SignedHeader:       signedHeader,
+		messageChannel:     make(chan []byte),
+		stopChannel:        make(chan []byte),
+		resultsMap:         cmap.New(),
 	}
 }
 
@@ -97,7 +98,7 @@ func (wsc *WSSClient) connect() {
 	} else {
 		wsc.idleTimeoutMinutes = wsc.idleTimeoutMinutes * time.Minute
 	}
-	wsc.isEveythingOK = true
+	wsc.stopChannel = make(chan []byte)
 	go wsc.sendMessageAsync()
 	go wsc.receiveMessageAsync()
 	wsc.resetIdleTimer()
@@ -108,7 +109,7 @@ func (wsc *WSSClient) connect() {
 func (wsc *WSSClient) SendMessage(message []byte, payload models.Payload) {
 	wsc.resultsMap.Set("error", nil)
 	wsc.resultsMap.Set(payload.RequestID, nil)
-	wsc.queryMessageChannel <- message
+	wsc.messageChannel <- message
 }
 
 // Close closes the WebSocket connection. perform clean up
@@ -116,17 +117,17 @@ func (wsc *WSSClient) Close() {
 	wsc.mu.Lock()
 	defer wsc.mu.Unlock()
 	if wsc.Conn != nil {
-		wsc.isEveythingOK = false
 		wsc.Conn.Close()
 		wsc.Conn = nil
 		wsc.idleTimer = nil
 		wsc.resultsMap.Clear()
 		log.Println("Websocket connnection closed")
+		close(wsc.stopChannel)
 	}
 }
 
 func (wsc *WSSClient) IsWebSocketClosed() bool {
-	return wsc.Conn == nil || !wsc.isEveythingOK
+	return wsc.Conn == nil
 }
 
 // resetIdleTimer resets the idle timer.
@@ -144,25 +145,32 @@ func (wsc *WSSClient) resetIdleTimer() {
 func (wsc *WSSClient) sendMessageAsync() {
 	defer wsc.Close()
 	for {
+		select {
 		// Read message from the query message channel
-		message, ok := <-wsc.queryMessageChannel
-		if !ok || !wsc.isEveythingOK {
+		case message, ok := <-wsc.messageChannel:
+			if !ok {
+				wsc.Close()
+			} else {
+				if wsc.Conn == nil {
+					log.Println(fmt.Errorf("Could not send message to websocket -> Not connected to WebSocket server"))
+					wsc.Error = "Could not send message to websocket -> Not connected to WebSocket server"
+					wsc.resultsMap.Set("error", fmt.Errorf("Could not send message to websocket -> "+"Not connected to WebSocket server"))
+					return
+				}
+				wsc.idleTimer.Reset(constants.IdleTimeoutMinutes)
+				wsc.mu.Lock()
+				err := wsc.Conn.WriteMessage(websocket.TextMessage, message)
+				wsc.mu.Unlock()
+				if err != nil {
+					log.Println(fmt.Errorf("Could not send message to websocket: %s", err.Error()))
+					wsc.resultsMap.Set("error", fmt.Errorf("Could not send message to websocket: %s", err.Error()))
+					wsc.Close()
+				}
+			}
+		case <-wsc.stopChannel:
 			log.Println("SendMessageAsync process interrupted. No messages will be sent to websocket now onwards.  Action : Reconnect websocket")
-			break
-		}
-		if wsc.Conn == nil {
-			wsc.Error = "Could not send message to websocket -> Not connected to WebSocket server"
-			wsc.resultsMap.Set("error", fmt.Errorf("Could not send message to websocket -> "+"Not connected to WebSocket server"))
 			return
 		}
-		wsc.idleTimer.Reset(constants.IdleTimeoutMinutes)
-		wsc.mu.Lock()
-		err := wsc.Conn.WriteMessage(websocket.TextMessage, message)
-		if err != nil {
-			wsc.isEveythingOK = false
-			wsc.resultsMap.Set("error", fmt.Errorf("Could not send message to websocket -> "+"Not connected to WebSocket server"))
-		}
-		wsc.mu.Unlock()
 	}
 }
 
@@ -170,35 +178,41 @@ func (wsc *WSSClient) sendMessageAsync() {
 func (wsc *WSSClient) receiveMessageAsync() {
 	defer wsc.Close()
 	for {
-		if wsc.Conn == nil {
-			wsc.Error = "Could not receive message from websocket -> Not connected to WebSocket server"
-			wsc.resultsMap.Set("error", fmt.Errorf("Could not recieve message from websocket -> "+"Not connected to WebSocket server"))
-			return
-		}
-		if !wsc.isEveythingOK {
+		select {
+		case <-wsc.stopChannel:
 			log.Println("ReceiveMessageAsync process intrrupted. No message will be consumed further. Action : Reconnect websocket")
-			break
-		}
-		_, message, err := wsc.Conn.ReadMessage()
-		if err != nil {
-			wsc.isEveythingOK = false
-			wsc.resultsMap.Set("error", fmt.Errorf("Could not read message from websocket -> ", err.Error()))
-		} else if message != nil {
-			var response *models.Response
-			err = json.Unmarshal([]byte(message), &response)
+			return
+		default:
+			if wsc.Conn == nil {
+				log.Println("Could not receive message from websocket -> Not connected to WebSocket server")
+				wsc.Error = "Could not receive message from websocket -> Not connected to WebSocket server"
+				wsc.resultsMap.Set("error", fmt.Errorf("Could not recieve message from websocket -> "+"Not connected to WebSocket server"))
+				return
+			}
+			_, message, err := wsc.Conn.ReadMessage()
 			if err != nil {
-				log.Println("Error parsing JSON:", err)
-				wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Error parsing JSON: "+err.Error()))
+				log.Println(fmt.Errorf("Could not read message from websocket -> ", err.Error()))
+				wsc.resultsMap.Set("error", fmt.Errorf("Could not read message from websocket -> ", err.Error()))
+				wsc.Close()
+			} else if message != nil {
+				var response *models.Response
+				err = json.Unmarshal([]byte(message), &response)
+				if err != nil {
+					log.Println("Error parsing JSON:", err.Error())
+					wsc.resultsMap.Set(response.RequestID, fmt.Errorf("Error parsing JSON: "+err.Error()))
+				}
+				if messagetype.DATA.String() == response.MessageType {
+					if v, ok := wsc.resultsMap.Get(response.RequestID); !ok || v == nil {
+						var responses = cmap.New()
+						wsc.resultsMap.Set(response.RequestID, responses)
+					}
+					v, _ := wsc.resultsMap.Get(response.RequestID)
+					if response.TotalSubBatches == 0 || response.TotalSubBatches == response.SubBatchSerial {
+						response.Keys = extractKeys(message)
+					}
+					v.(cmap.ConcurrentMap).Set(string(response.SubBatchSerial), response)
+				}
 			}
-			if v, ok := wsc.resultsMap.Get(response.RequestID); !ok || v == nil {
-				var responses = cmap.New()
-				wsc.resultsMap.Set(response.RequestID, responses)
-			}
-			v, _ := wsc.resultsMap.Get(response.RequestID)
-			if response.TotalSubBatches == 0 || response.TotalSubBatches == response.SubBatchSerial {
-				response.Keys = extractKeys(message)
-			}
-			v.(cmap.ConcurrentMap).Set(string(response.SubBatchSerial), response)
 		}
 	}
 }

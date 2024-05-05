@@ -33,16 +33,5 @@ func GetPayLoad() Payload {
 		MessageType: "SQL_QUERY",
 		SQL:         "",
 		RequestID:   "",
-		ReadCache:   "NONE",
-		Tags: []Tag{
-			{
-				Name:  "CostCenter",
-				Value: "930",
-			},
-			{
-				Name:  "ProjectId",
-				Value: "Top secret Area 53",
-			},
-		},
 	}
 }
