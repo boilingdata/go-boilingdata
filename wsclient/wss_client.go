@@ -33,6 +33,7 @@ type WSSClient struct {
 	messageChannel     chan []byte
 	stopChannel        chan []byte
 	resultsMap         cmap.ConcurrentMap
+	interrupt          chan os.Signal
 }
 
 // NewWSSClient creates a new instance of WSSClient.
@@ -41,7 +42,7 @@ func NewWSSClient(url string, idleTimeoutMinutes time.Duration, signedHeader htt
 	if signedHeader == nil {
 		signedHeader = make(http.Header)
 	}
-	return &WSSClient{
+	wsc := &WSSClient{
 		URL:                url,
 		DialOpts:           &websocket.Dialer{},
 		idleTimeoutMinutes: idleTimeoutMinutes,
@@ -49,7 +50,11 @@ func NewWSSClient(url string, idleTimeoutMinutes time.Duration, signedHeader htt
 		messageChannel:     make(chan []byte),
 		stopChannel:        make(chan []byte),
 		resultsMap:         cmap.New(),
+		interrupt:          make(chan os.Signal, 1),
 	}
+	wsc.resetIdleTimer()
+	wsc.osInterrupt()
+	return wsc
 }
 
 func (wsc *WSSClient) Connect() {
@@ -67,23 +72,6 @@ func (wsc *WSSClient) Connect() {
 }
 
 func (wsc *WSSClient) connect() {
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-
-	wsc.Wg = sync.WaitGroup{}
-	wsc.Wg.Add(1)
-
-	go func() {
-		defer wsc.Wg.Done()
-		for {
-			select {
-			case <-interrupt:
-				log.Println("Interrupt signal received, closing connection")
-				wsc.close(true)
-				return
-			}
-		}
-	}()
 	// Connect to WebSocket server
 	conn, _, err := websocket.DefaultDialer.Dial(wsc.URL, wsc.SignedHeader)
 	if err != nil {
@@ -93,15 +81,9 @@ func (wsc *WSSClient) connect() {
 		return
 	}
 	wsc.Conn = conn // Assign the connection to the Conn field
-	if wsc.idleTimeoutMinutes <= 0 {
-		wsc.idleTimeoutMinutes = constants.IdleTimeoutMinutes
-	} else {
-		wsc.idleTimeoutMinutes = wsc.idleTimeoutMinutes * time.Minute
-	}
 	wsc.stopChannel = make(chan []byte)
 	go wsc.sendMessageAsync()
 	go wsc.receiveMessageAsync()
-	wsc.resetIdleTimer()
 	wsc.ConnInit.Done()
 }
 
@@ -113,18 +95,18 @@ func (wsc *WSSClient) SendMessage(message []byte, payload messages.Payload) {
 }
 
 // Close closes the WebSocket connection. perform clean up
-func (wsc *WSSClient) close(stopProcesses bool) {
+func (wsc *WSSClient) shutdown() {
 	wsc.mu.Lock()
 	defer wsc.mu.Unlock()
+	wsc.resultsMap.Clear()
+	if wsc.stopChannel != nil {
+		close(wsc.stopChannel)
+		wsc.stopChannel = nil
+	}
 	if wsc.Conn != nil {
 		wsc.Conn.Close()
 		wsc.Conn = nil
-	}
-	wsc.idleTimer = nil
-	wsc.resultsMap.Clear()
-	log.Println("Websocket connnection closed")
-	if stopProcesses {
-		close(wsc.stopChannel)
+		log.Println("Websocket connnection closed")
 	}
 }
 
@@ -134,18 +116,43 @@ func (wsc *WSSClient) IsWebSocketClosed() bool {
 
 // resetIdleTimer resets the idle timer.
 func (wsc *WSSClient) resetIdleTimer() {
+	if wsc.idleTimeoutMinutes <= 0 {
+		wsc.idleTimeoutMinutes = constants.IdleTimeoutMinutes
+	} else {
+		wsc.idleTimeoutMinutes = wsc.idleTimeoutMinutes * time.Minute
+	}
+	// Stop the existing timer if it exists
 	if wsc.idleTimer != nil {
 		wsc.idleTimer.Stop()
 	}
 	wsc.idleTimer = time.AfterFunc(wsc.idleTimeoutMinutes, func() {
 		log.Println("Idle timeout reached, closing connection")
-		wsc.close(true)
+		wsc.shutdown()
+		wsc.resetIdleTimer()
 	})
+}
+
+func (wsc *WSSClient) osInterrupt() {
+	signal.Notify(wsc.interrupt, os.Interrupt)
+	wsc.Wg = sync.WaitGroup{}
+	wsc.Wg.Add(1)
+	go func() {
+		defer wsc.Wg.Done()
+		for {
+			select {
+			case <-wsc.interrupt:
+				log.Println("Interrupt signal received, closing connection")
+				wsc.shutdown()
+				wsc.osInterrupt()
+				return
+			}
+		}
+	}()
 }
 
 // Async function to send message through channel
 func (wsc *WSSClient) sendMessageAsync() {
-	defer wsc.close(false)
+	defer wsc.shutdown()
 	for {
 		select {
 		// Read message from the query message channel
@@ -178,7 +185,7 @@ func (wsc *WSSClient) sendMessageAsync() {
 
 // Async function to receive message through channel
 func (wsc *WSSClient) receiveMessageAsync() {
-	defer wsc.close(false)
+	defer wsc.shutdown()
 	for {
 		select {
 		case <-wsc.stopChannel:
