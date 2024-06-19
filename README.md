@@ -1,3 +1,9 @@
+# BoilingData Go SDK
+
+This is considered in beta. 
+
+- This SDK is used in [Grafana Datasource Plugin](https://github.com/boilingdata/boilingdata-datasource).
+
 ## RUN Program
 
 Navigate to the directory and execute the below command to run application
